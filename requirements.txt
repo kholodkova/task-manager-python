@@ -1,0 +1,11 @@
+# Шаг 3: зависимости проекта.
+fastapi
+uvicorn[standard]
+# [asyncio] ставит greenlet — без него асинхронный режим SQLAlchemy не работает.
+sqlalchemy[asyncio]>=2.0
+asyncpg
+pydantic>=2
+pydantic-settings
+alembic
+# Нужен для типа EmailStr из шага 7.
+email-validator

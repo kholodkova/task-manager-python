@@ -1,0 +1,15 @@
+# Шаг 2: PostgreSQL 16 в Docker.
+# Запуск: docker compose up -d db
+# Проверка: docker compose exec db psql -U app -d tasks -c "select 1"
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: app
+      POSTGRES_PASSWORD: app
+      POSTGRES_DB: tasks
+    ports: ["5432:5432"]
+    # Данные хранятся в томе pgdata и сохраняются при перезапуске контейнера.
+    volumes: [pgdata:/var/lib/postgresql/data]
+volumes:
+  pgdata:
