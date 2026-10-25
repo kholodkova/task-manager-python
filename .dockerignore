@@ -1,0 +1,12 @@
+# В контекст сборки не попадают служебные и локальные файлы.
+.git
+.github
+.venv
+.env
+.idea
+**/__pycache__
+*.pyc
+.pytest_cache
+.ruff_cache
+docs
+NEXT_STEPS.md

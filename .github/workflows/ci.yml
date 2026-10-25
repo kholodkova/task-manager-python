@@ -1,0 +1,109 @@
+# Практическая работа № 3, шаг 7.
+#   lint, test — на каждый push и pull request;
+#   build      — только push в main и только после успешных lint и test:
+#                образ публикуется в GitHub Container Registry и Docker Hub.
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  # ruff: ошибки в коде и порядок импортов.
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Установить ruff
+        run: python -m pip install ruff
+      - name: Проверить код
+        run: ruff check --output-format=github .
+
+  # pytest на настоящей PostgreSQL, поднятой как service-контейнер.
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: app
+          POSTGRES_PASSWORD: app
+          # Сразу создаём тестовую базу — init-скрипт здесь не нужен.
+          POSTGRES_DB: tasks_test
+        ports:
+          - 5432:5432
+        # Job ждёт, пока БД не станет healthy.
+        options: >-
+          --health-cmd="pg_isready -U app -d tasks_test"
+          --health-interval=3s
+          --health-timeout=3s
+          --health-retries=20
+    env:
+      TEST_DATABASE_URL: postgresql+asyncpg://app:app@localhost:5432/tasks_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          # Кэш pip между запусками ускоряет установку зависимостей.
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+      - name: Установить зависимости
+        run: python -m pip install -r requirements-dev.txt
+      - name: Запустить тесты
+        run: python -m pytest -v
+
+  # Сборка и публикация образа.
+  build:
+    # Без успешных lint и test этот job не запускается (статус skipped).
+    needs: [lint, test]
+    # Только push в ветку main: на pull request и в других ветках образ не публикуется.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # Право публиковать пакеты в GHCR встроенным GITHUB_TOKEN.
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Вход в GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Вход в Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      # Имена образов и теги: latest и короткий SHA коммита.
+      - name: Теги образа
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: |
+            ghcr.io/${{ github.repository }}
+            docker.io/${{ secrets.DOCKERHUB_USERNAME }}/${{ github.event.repository.name }}
+          tags: |
+            type=raw,value=latest
+            type=sha
+
+      - name: Собрать и опубликовать
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          # Публикуется только финальный этап Dockerfile.
+          target: runtime
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}

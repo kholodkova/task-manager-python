@@ -12,7 +12,6 @@ from typing import Optional
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
-
 # ---------- User ----------
 
 # Общие поля пользователя для Create и Read.

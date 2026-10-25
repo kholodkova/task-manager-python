@@ -1,0 +1,6 @@
+# Практическая работа № 3, шаг 1: инструменты разработки поверх зависимостей приложения.
+-r requirements.txt
+pytest
+pytest-asyncio
+httpx
+ruff
