@@ -66,4 +66,4 @@ async def test_deleted_task_is_not_found(api, make_user, make_task):
     task = await make_task(owner["id"])
 
     assert (await api.delete(f"/tasks/{task['id']}")).status_code == 204
-    assert (await api.get(f"/tasks/{task['id']}")).status_code == 200  # BROKEN: шаг 8, ожидается 404
+    assert (await api.get(f"/tasks/{task['id']}")).status_code == 404
