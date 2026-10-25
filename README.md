@@ -1,6 +1,8 @@
 # Менеджер задач — FastAPI + PostgreSQL + SQLAlchemy + Pydantic
 
-Практическая работа № 2: REST API для хранения пользователей и их задач.
+![CI](https://github.com/kholodkova/task-manager-python/actions/workflows/ci.yml/badge.svg)
+
+Практические работы № 2 и № 3: REST API для хранения пользователей и их задач, автоматические тесты, контейнеризация и CI/CD.
 
 Стек: FastAPI, Starlette (middleware), SQLAlchemy 2.0 (async, asyncpg), Pydantic v2, pydantic-settings, Alembic, PostgreSQL 16 в Docker.
 
@@ -70,9 +72,14 @@ app/
     ├── users.py     # /users
     └── tasks.py     # /tasks
 migrations/          # Alembic (async), первая миграция в versions/
+.github/workflows/   # GitHub Actions: lint, test и build
+docker/              # создание отдельной тестовой БД
+tests/               # автоматические тесты API
 alembic.ini
-docker-compose.yml   # PostgreSQL 16
+Dockerfile           # этапы сборки wheels, test и runtime
+docker-compose.yml   # PostgreSQL 16, приложение и тесты
 requirements.txt
+requirements-dev.txt # зависимости для тестов и линтера
 .env.example         # образец DATABASE_URL
 ```
 
@@ -112,7 +119,7 @@ docker compose exec db psql -U app -d tasks -c '\dt'
 
 ![](docs/screenshots/08-dt.png)
 
-## Ответы на контрольные вопросы
+## Ответы на контрольные вопросы (практическая № 2)
 
 **1. Чем FastAPI отличается от Starlette и какие компоненты Starlette он использует?**
 
@@ -142,3 +149,111 @@ docker compose exec db psql -U app -d tasks -c '\dt'
 
 - `sqlalchemy[asyncio]` вместо `sqlalchemy` — ставит пакет greenlet, без которого асинхронный режим SQLAlchemy не импортируется.
 - `email-validator` — без него не работает тип `EmailStr`, который требуется в шаге 7.
+
+## Практическая работа № 3
+
+### Запуск тестов локально
+
+Для тестов используется отдельная база `tasks_test`. Сначала нужно запустить PostgreSQL и установить зависимости для разработки:
+
+```bash
+docker compose up -d db
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements-dev.txt
+python -m pytest -q
+```
+
+Каждый тест начинает работу с чистыми таблицами. Через `app.dependency_overrides` обычная сессия приложения заменяется тестовой сессией.
+
+### Запуск тестов через Docker Compose
+
+```bash
+docker compose --profile test run --rm tests
+```
+
+Сервис `tests` собирается из этапа `test` Dockerfile и запускается после того, как PostgreSQL пройдёт healthcheck.
+
+### Запуск приложения через Docker Compose
+
+```bash
+docker compose up -d --build
+```
+
+- `db` — PostgreSQL 16 с healthcheck;
+- `app` ждёт готовности БД, выполняет `alembic upgrade head` и запускает Uvicorn;
+- Swagger UI открывается по адресу http://localhost:8000/docs.
+
+### Dockerfile
+
+Dockerfile состоит из трёх этапов:
+
+1. `wheels` собирает wheel-файлы зависимостей.
+2. `test` создаёт образ для автотестов.
+3. `runtime` создаёт финальный образ приложения без dev-зависимостей. Приложение запускается от непривилегированного пользователя `appuser` с UID 10001.
+
+### CI/CD
+
+Workflow `.github/workflows/ci.yml` выполняет следующие задачи:
+
+| Job | Когда запускается | Что делает |
+|---|---|---|
+| `lint` | каждый push и pull request | проверяет проект командой `ruff check` |
+| `test` | каждый push и pull request | запускает pytest с PostgreSQL |
+| `build` | push в `main` после успешных `lint` и `test` | собирает и публикует образ в GHCR и Docker Hub |
+
+Для публикации в Docker Hub используются GitHub Actions secrets `DOCKERHUB_USERNAME` и `DOCKERHUB_TOKEN`.
+
+### Скриншоты CI
+
+Pull request с намеренно сломанным тестом:
+
+![Упавший pipeline](docs/screenshots/pipeline-failed.png)
+
+Успешный pipeline после исправления теста:
+
+![Успешный pipeline](docs/screenshots/pipeline-passed.png)
+
+### Опубликованный образ
+
+- GHCR: https://github.com/kholodkova/task-manager-python/pkgs/container/task-manager-python
+- Docker Hub: https://hub.docker.com/r/kholodkova/task-manager-python
+
+```bash
+docker pull ghcr.io/kholodkova/task-manager-python:latest
+docker pull kholodkova/task-manager-python:latest
+```
+
+## Ответы на контрольные вопросы (практическая № 3)
+
+**1. Чем CI отличается от CD (continuous delivery и continuous deployment)?**
+
+CI проверяет код после изменений. Например, GitHub Actions запускает линтер и тесты. Если есть ошибка, я увижу её до добавления кода в ветку `main`.
+
+CD отвечает за доставку готовой версии. При continuous delivery программа готова к публикации, но её запускает человек. При continuous deployment успешная версия публикуется автоматически.
+
+**2. Как работает `dependency_overrides` и зачем он нужен в тестах?**
+
+`app.dependency_overrides` позволяет временно заменить зависимость FastAPI. В моих тестах обычная функция `get_session` заменяется на тестовую. Поэтому запросы работают с базой `tasks_test`, а рабочая база `tasks` не изменяется.
+
+**3. Зачем нужна многоэтапная сборка образа?**
+
+Сборка разделена на несколько этапов. На одном этапе подготавливаются зависимости, на другом запускаются тесты, а на последнем создаётся образ приложения. В финальный образ не попадают тесты и лишние инструменты, поэтому он получается меньше.
+
+**4. Почему контейнер не следует запускать от root?**
+
+Пользователь root имеет слишком много прав. Если в приложении будет ошибка, через неё можно будет изменить больше файлов и настроек контейнера. Обычный пользователь `appuser` имеет меньше прав, поэтому такой запуск безопаснее.
+
+**5. Как в GitHub Actions передаются секреты и почему их нельзя хранить в репозитории?**
+
+Секреты добавляются в настройках GitHub-репозитория. В workflow к ним обращаются через запись `${{ secrets.ИМЯ }}`. Сам токен нельзя писать в коде или загружать в Git: тогда его смогут увидеть другие люди и использовать от моего имени.
+
+**6. Что произойдёт с job `build`, если упадёт `test`? Где это задаётся?**
+
+Если тесты упадут, job `build` не запустится и Docker-образ не будет опубликован. Это задаёт строка `needs: [lint, test]` в файле `ci.yml`. Условие `if` дополнительно разрешает сборку только после push в ветку `main`.
+
+**7. Где лучше применять миграции: при старте контейнера или отдельным шагом в CD? Каковы плюсы и минусы каждого варианта?**
+
+При старте контейнера миграции применяются автоматически. Из минусов - при запуске нескольких контейнеров они могут одновременно начать одну миграцию. Если миграция завершится с ошибкой, приложение не запустится.
+
+Отдельный шаг CD запускает миграцию один раз перед новой версией приложения. Если появится ошибка - публикацию можно остановить.
