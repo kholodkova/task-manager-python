@@ -1,0 +1,9 @@
+# Настройки линтера ruff (используется в job-е lint).
+[tool.ruff]
+line-length = 110
+# Миграции генерирует Alembic — их стиль не проверяем.
+exclude = ["migrations"]
+
+[tool.ruff.lint]
+# E/W — стиль PEP 8, F — ошибки (неиспользуемые импорты, имена), I — порядок импортов.
+select = ["E", "W", "F", "I"]
